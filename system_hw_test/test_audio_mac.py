@@ -1,50 +1,91 @@
-import osascript
-import sounddevice as sd
-import soundfile as sf
+import os
+import osascript          # macOS AppleScript wrapper
+import sounddevice as sd  # audio I/O
+import soundfile as sf    # read/write audio files
 
+# --------------------------- 1. Load the audio file ---------------------------
 filename = "woof.wav"
-# Extract data and sampling rate from file
-data, fs = sf.read(filename, dtype="float32")
 
-# Get all available devices
-devices = sd.query_devices()
-print(devices)
-
-# Set the default output device to the first available output
-# You might need to change the index based on your system
-# You can also set it using a string, e.g., sd.default.device = 'Internal Speakers'
 try:
-    output_device_index = next(
-        i for i, device in enumerate(devices) if device["name"] == "External Headphones"
-    )
-    sd.default.device = output_device_index
-    print(f"Default output device set to: {devices[output_device_index]['name']}")
+    if not os.path.isfile(filename):
+        raise FileNotFoundError(f"File not found: {filename}")
+
+    # data: np.ndarray, samplerate: int
+    data, samplerate = sf.read(filename, dtype="float32")
+except FileNotFoundError as e:
+    print(e)
+    raise SystemExit(1)
+except RuntimeError as e:  # soundfile internal error
+    print(f"Error reading audio file: {e}")
+    raise SystemExit(1)
+
+# --------------------------- 2. Query available devices ---------------------------
+try:
+    devices = sd.query_devices()
+    print("Available audio devices:")
+    print(devices)
+except Exception as e:
+    print(f"Failed to query devices: {e}")
+    raise SystemExit(1)
+
+# --------------------------- 3. Set default output device ---------------------------
+output_device_name = "External Headphones"   # change to your device name
+
+try:
+    # Find the device whose name exactly matches `output_device_name`
+    output_idx = next(i for i, dev in enumerate(devices) if dev["name"] == output_device_name)
+    # Set (input, output) tuple – we only care about output here
+    sd.default.device = (None, output_idx)
+    print(f"Default output device set to '{devices[output_idx]['name']}' (index {output_idx})")
 except StopIteration:
-    print("No output device found.")
+    print(f"Output device \"{output_device_name}\" not found. Using system default.")
+except Exception as e:
+    print(f"Error setting output device: {e}")
+    raise SystemExit(1)
 
-# Verify the change
-print(
-    f"Current default output device is: {sd.query_devices(sd.default.device)['name']}"
-)
+# --------------------------- 4. Helper to run AppleScript ---------------------------
+def run_osascript(cmd: str):
+    """Execute AppleScript and raise on error."""
+    result, rc = osascript.osascript(cmd)
+    if rc != 0:
+        raise RuntimeError(f"AppleScript error ({rc}): {result}")
+    return result
 
-print("Current volume settings")
-result = osascript.osascript("get volume settings")
-print(result)
+# --------------------------- 5. Show current volume ---------------------------
+try:
+    vol_info = run_osascript("get volume settings")
+    print("Current volume settings:", vol_info)
+except Exception as e:
+    print(f"Failed to get volume settings: {e}")
 
-target_volume = 100
-print(f"Setting volume to: {target_volume}")
-vol = "set volume output volume " + str(target_volume)
-osascript.osascript(vol)
+# --------------------------- 6. Set volume to maximum (0-100) ---------------------------
+target_volume = 100   # integer between 0 and 100
 
-result = osascript.osascript("get volume settings")
-print(result)
+try:
+    run_osascript(f"set volume output volume {target_volume}")
+    print(f"Volume set to {target_volume}%")
+except Exception as e:
+    print(f"Failed to set volume: {e}")
 
-# force unmute
-osascript.osascript("set volume without output muted")
+# --------------------------- 7. Unmute -----------------------------------
+try:
+    run_osascript("set volume without output muted")
+    print("Unmuted")
+except Exception as e:
+    print(f"Failed to unmute: {e}")
 
-print("Confirm loud and unmuted:")
-result = osascript.osascript("get volume settings")
-print(result)
+# --------------------------- 8. Final verification -----------------------
+try:
+    print("Final volume state:", run_osascript("get volume settings"))
+except Exception as e:
+    print(f"Failed to verify final volume state: {e}")
 
-sd.play(data, fs)
-status = sd.wait()  # Wait until file is done playing
+# --------------------------- 9. Play the audio ---------------------------
+try:
+    sd.play(data, samplerate)   # start playback (non-blocking)
+    sd.wait()                   # block until playback finishes
+    print("Playback finished successfully")
+except Exception as e:
+    print(f"Error during playback: {e}")
+finally:
+    sd.stop()                   # clean up the device
