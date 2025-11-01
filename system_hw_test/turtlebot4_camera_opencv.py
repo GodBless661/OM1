@@ -8,14 +8,23 @@ sys.path.insert(0, "../src")
 from zenoh_msgs import open_zenoh_session
 
 
+# Parameter
+HEADER_SIZE = 76
+WIDTH = 250
+HEIGHT = 250
+CHANNELS = 3
+EXPECTED_IMAGE_BYTES = WIDTH * HEIGHT * CHANNELS  # 187500
+EXPECTED_TOTAL = HEADER_SIZE + EXPECTED_IMAGE_BYTES
+
+
 def listener(sample):
     bytesI = sample.payload.to_bytes()
     print(f"Received {len(sample.payload)}")
     X = np.frombuffer(bytesI, dtype=np.uint8)
     # for some reason the first 76 numbers are trash?
     # some sort of metadata header?
-    Xc = X[76:187576]
-    rgb = np.reshape(Xc, (250, 250, 3))
+    Xc = X[HEADER_SIZE:HEADER_SIZE + EXPECTED_IMAGE_BYTES]
+    rgb = np.reshape(Xc, (HEIGHT, WIDTH, CHANNELS))
     cv2.imwrite("front_image.jpg", rgb)
 
 
